@@ -1,0 +1,253 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== DARK THEME (Default) ===== */
+.dark {
+  --bg-primary: #060714;
+  --bg-secondary: #0d0e24;
+  --bg-card: rgba(255, 255, 255, 0.05);
+  --bg-card-hover: rgba(255, 255, 255, 0.08);
+  --bg-card-solid: #111228;
+  --bg-input: rgba(255, 255, 255, 0.05);
+  --bg-input-focus: rgba(255, 255, 255, 0.08);
+  --bg-badge: rgba(255, 255, 255, 0.06);
+  --bg-code: rgba(0, 0, 0, 0.3);
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(255, 255, 255, 0.15);
+  --text-primary: #ffffff;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-dim: #475569;
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.5);
+  --nav-bg: rgba(6, 7, 20, 0.85);
+  --footer-bg: rgba(6, 7, 20, 0.6);
+}
+
+/* ===== LIGHT THEME ===== */
+.light {
+  --bg-primary: #f4f6fb;
+  --bg-secondary: #ffffff;
+  --bg-card: rgba(255, 255, 255, 0.85);
+  --bg-card-hover: rgba(255, 255, 255, 1);
+  --bg-card-solid: #ffffff;
+  --bg-input: #f1f5f9;
+  --bg-input-focus: #ffffff;
+  --bg-badge: #f1f5f9;
+  --bg-code: #f1f5f9;
+  --border-color: #e2e8f0;
+  --border-hover: #cbd5e1;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --text-dim: #94a3b8;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --nav-bg: rgba(255, 255, 255, 0.9);
+  --footer-bg: #f8fafc;
+}
+
+/* ===== SCROLLBAR ===== */
+* {
+  scrollbar-width: thin;
+}
+
+.dark * { scrollbar-color: #1e293b #060714; }
+.light * { scrollbar-color: #cbd5e1 #f4f6fb; }
+
+*::-webkit-scrollbar { width: 6px; }
+.dark *::-webkit-scrollbar-track { background: #060714; }
+.dark *::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+.light *::-webkit-scrollbar-track { background: #f4f6fb; }
+.light *::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+/* ===== BODY ===== */
+body {
+  background: var(--bg-primary) !important;
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* ===== COMPONENT CLASSES ===== */
+@layer components {
+
+  /* Glass Card */
+  .glass-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 1rem;
+    box-shadow: var(--shadow);
+    transition: all 0.3s ease;
+  }
+
+  .light .glass-card {
+    background: var(--bg-card);
+    backdrop-filter: none;
+  }
+
+  .dark .glass-card {
+    backdrop-filter: blur(16px);
+  }
+
+  .glass-card-hover {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 1rem;
+    box-shadow: var(--shadow);
+    transition: all 0.3s ease;
+  }
+
+  .glass-card-hover:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border-hover);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .dark .glass-card-hover {
+    backdrop-filter: blur(16px);
+  }
+
+  /* Gradient Text */
+  .gradient-text {
+    @apply bg-gradient-to-r from-blue-500 via-purple-500 to-cyan-500 bg-clip-text text-transparent;
+  }
+
+  /* Neon Glow */
+  .dark .neon-glow {
+    box-shadow: 0 0 15px rgba(99, 102, 241, 0.3), 0 0 30px rgba(99, 102, 241, 0.1);
+  }
+  .light .neon-glow {
+    box-shadow: 0 4px 24px rgba(99, 102, 241, 0.12), 0 1px 4px rgba(0, 0, 0, 0.04);
+  }
+
+  /* Buttons */
+  .btn-primary {
+    @apply px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600
+           hover:from-blue-500 hover:to-purple-500
+           rounded-xl font-semibold text-white
+           transition-all duration-300
+           active:scale-95;
+    box-shadow: 0 4px 14px rgba(79, 70, 229, 0.3);
+  }
+  .btn-primary:hover {
+    box-shadow: 0 6px 20px rgba(79, 70, 229, 0.4);
+  }
+
+  .btn-secondary {
+    @apply px-6 py-3 rounded-xl font-semibold transition-all duration-300 active:scale-95;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+  }
+  .btn-secondary:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border-hover);
+  }
+
+  /* Input */
+  .input-field {
+    @apply w-full px-4 py-3 rounded-xl transition-all duration-300;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+  }
+  .input-field::placeholder { color: var(--text-dim); }
+  .input-field:focus {
+    outline: none;
+    background: var(--bg-input-focus);
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  }
+}
+
+/* ===== GRID PATTERN ===== */
+.dark .bg-grid-pattern {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 50px 50px;
+}
+.light .bg-grid-pattern {
+  background-image:
+    linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,0,0,0.03) 1px, transparent 1px);
+  background-size: 50px 50px;
+}
+
+/* ===== LIGHT MODE TEXT OVERRIDES ===== */
+.light .text-white { color: var(--text-primary); }
+.light .text-gray-300 { color: #334155; }
+.light .text-gray-400 { color: #475569; }
+.light .text-gray-500 { color: #64748b; }
+.light .text-gray-600 { color: #94a3b8; }
+.light .text-gray-700 { color: #334155; }
+
+/* ===== LIGHT MODE BACKGROUND OVERRIDES ===== */
+.light .bg-arc-darker { background: var(--bg-primary) !important; }
+.light .bg-arc-dark { background: var(--bg-secondary) !important; }
+
+.light .bg-white\/5 { background: rgba(0, 0, 0, 0.02) !important; }
+.light .bg-white\/10 { background: rgba(0, 0, 0, 0.04) !important; }
+.light .bg-black\/20 { background: rgba(0, 0, 0, 0.03) !important; }
+
+/* ===== LIGHT MODE BORDER OVERRIDES ===== */
+.light .border-white\/5 { border-color: #e2e8f0 !important; }
+.light .border-white\/10 { border-color: #e2e8f0 !important; }
+.light .border-white\/20 { border-color: #cbd5e1 !important; }
+
+/* ===== LIGHT MODE COLORED BACKGROUNDS ===== */
+.light .bg-green-500\/5 { background: rgba(16, 185, 129, 0.06) !important; }
+.light .bg-green-500\/10 { background: rgba(16, 185, 129, 0.08) !important; }
+.light .bg-green-500\/20 { background: rgba(16, 185, 129, 0.1) !important; }
+.light .bg-blue-500\/5 { background: rgba(59, 130, 246, 0.06) !important; }
+.light .bg-blue-500\/10 { background: rgba(59, 130, 246, 0.08) !important; }
+.light .bg-red-500\/5 { background: rgba(239, 68, 68, 0.06) !important; }
+.light .bg-red-500\/10 { background: rgba(239, 68, 68, 0.08) !important; }
+.light .bg-red-500\/20 { background: rgba(239, 68, 68, 0.1) !important; }
+.light .bg-yellow-500\/5 { background: rgba(234, 179, 8, 0.06) !important; }
+.light .bg-yellow-500\/20 { background: rgba(234, 179, 8, 0.1) !important; }
+.light .bg-purple-500\/10 { background: rgba(139, 92, 246, 0.08) !important; }
+.light .bg-purple-500\/20 { background: rgba(139, 92, 246, 0.1) !important; }
+.light .bg-cyan-500\/10 { background: rgba(6, 182, 212, 0.08) !important; }
+.light .bg-orange-500\/10 { background: rgba(249, 115, 22, 0.08) !important; }
+.light .bg-pink-500\/10 { background: rgba(236, 72, 153, 0.08) !important; }
+
+/* ===== LIGHT MODE COLORED TEXT ===== */
+.light .text-green-400 { color: #059669 !important; }
+.light .text-blue-400 { color: #2563eb !important; }
+.light .text-purple-400 { color: #7c3aed !important; }
+.light .text-cyan-400 { color: #0891b2 !important; }
+.light .text-pink-400 { color: #db2777 !important; }
+.light .text-orange-400 { color: #ea580c !important; }
+.light .text-yellow-400 { color: #ca8a04 !important; }
+.light .text-red-400 { color: #dc2626 !important; }
+
+/* ===== LIGHT MODE FONT MONO ===== */
+.light .font-mono { color: #475569; }
+
+/* ===== LIGHT MODE SPECIFIC COMPONENT FIXES ===== */
+.light .blur-3xl { opacity: 0.3; }
+
+.light .bg-green-500\/10,
+.light .bg-cyan-500\/10,
+.light .bg-purple-500\/10,
+.light .bg-blue-500\/10 {
+  border: 1px solid var(--border-color);
+}
+
+.light [class*="bg-gradient-to-br"] {
+  opacity: 0.9;
+}
+.light [class*="bg-gradient-to-br"] * {
+  color: white !important;
+}
+
+.light tr:hover { background: rgba(0,0,0,0.02) !important; }
+.light .hover\:bg-white\/5:hover { background: rgba(0,0,0,0.02) !important; }
+
+.light [data-hot-toast] {
+  background: white !important;
+  color: #0f172a !important;
+  border: 1px solid #e2e8f0 !important;
+}

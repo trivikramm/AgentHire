@@ -1,8 +1,8 @@
-import {
-  initiateDeveloperControlledWalletsClient,
-} from '@circle-fin/developer-controlled-wallets';
+// src/lib/circleSDK.js
+import { v4 as uuidv4 } from 'uuid';
+import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
-const ARC_TESTNET_USDC = '0x3600000000000000000000000000000000000';
+const ARC_TESTNET_USDC = '0x3600000000000000000000000000000000000000';
 const EXPLORER_URL = process.env.ARC_EXPLORER_URL || 'https://testnet.arcscan.app';
 
 let client = null;
@@ -13,7 +13,6 @@ function getClient() {
   const apiKey = process.env.CIRCLE_API_KEY;
   const entitySecret = process.env.CIRCLE_ENTITY_SECRET;
 
-  // Only skip if truly not configured
   if (!apiKey || !entitySecret || apiKey === 'your_circle_api_key' || entitySecret === 'your_entity_secret') {
     console.warn('⚠️ Circle SDK not configured — using simulation mode');
     return null;
@@ -29,6 +28,60 @@ function getClient() {
   } catch (error) {
     console.error('❌ Circle SDK init error:', error.message);
     return null;
+  }
+}
+
+function createEvent(type, message, data = {}) {
+  return {
+    id: uuidv4(),
+    timestamp: Date.now(),
+    type,
+    message,
+    data,
+  };
+}
+
+export async function fundWallet(walletId, amount = 1) {
+  const sdk = getClient();
+  const apiKey = process.env.CIRCLE_API_KEY;
+
+  if (!sdk) {
+    console.log('⚠️ Cannot fund: SDK not configured');
+    return { success: false };
+  }
+
+  if (!apiKey) {
+    console.error('❌ CIRCLE_API_KEY not set');
+    return { success: false };
+  }
+
+  try {
+    const response = await fetch('https://testnet-api.circle.com/v1/faucet', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        walletId,
+        amount: amount.toFixed(6),
+        token: 'USDC',
+        blockchain: 'ARC-TESTNET',
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      console.log(`✅ Funded wallet ${walletId} with $${amount} USDC`);
+      return { success: true, ...data };
+    } else {
+      const err = await response.text();
+      console.error('❌ Faucet error:', err);
+      return { success: false, error: err };
+    }
+  } catch (error) {
+    console.error('❌ Funding failed:', error.message);
+    return { success: false, error: error.message };
   }
 }
 
@@ -76,13 +129,60 @@ export async function createAgentWallet(walletSetId, agentName) {
 }
 
 export async function sendUSDCTransfer(fromWalletAddress, toWalletAddress, amount, memo = '') {
+  const events = [];
   const sdk = getClient();
 
   if (!sdk) {
-    return simulateTransfer(fromWalletAddress, toWalletAddress, amount, memo);
+    const simResult = await simulateTransfer(fromWalletAddress, toWalletAddress, amount, memo);
+    return { payment: simResult.payment, events: simResult.events };
   }
 
   try {
+    const walletSetId = process.env.CIRCLE_WALLET_SET_ID;
+    const walletList = await sdk.listWallets({ walletSetId });
+    const wallet = walletList.data?.wallets?.find(
+      (w) => w.address.toLowerCase() === fromWalletAddress.toLowerCase()
+    );
+
+    if (wallet) {
+      const bal = await sdk.getWalletTokenBalance({ id: wallet.id });
+      const usdcBalance = bal.data?.tokenBalances?.find((b) => b.token?.symbol === 'USDC');
+      const currentBalance = parseFloat(usdcBalance?.amount || '0');
+
+      if (currentBalance < amount) {
+        const fundingMsg = `💰 Balance low ($${currentBalance}), funding ${wallet.id.slice(0, 8)}...`;
+        console.log(fundingMsg);
+        events.push(createEvent('funding', fundingMsg, {
+          walletId: wallet.id,
+          currentBalance,
+          needed: amount,
+        }));
+
+        const funded = await fundWallet(wallet.id, amount + 1);
+
+        if (!funded.success) {
+          const failMsg = '❌ Funding failed — falling back to simulation';
+          console.error(failMsg);
+          events.push(createEvent('error', failMsg, { reason: funded.error }));
+
+          const sim = await simulateTransfer(fromWalletAddress, toWalletAddress, amount, memo);
+          return {
+            payment: sim.payment,
+            events: [...events, ...sim.events],
+          };
+        }
+
+        const fundedMsg = `✅ Funded wallet with $${(amount + 1).toFixed(4)} USDC`;
+        console.log(fundedMsg);
+        events.push(createEvent('funding', fundedMsg, {
+          walletId: wallet.id,
+          amount: amount + 1,
+        }));
+
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    }
+
     const response = await sdk.createTransaction({
       blockchain: 'ARC-TESTNET',
       walletAddress: fromWalletAddress,
@@ -92,29 +192,47 @@ export async function sendUSDCTransfer(fromWalletAddress, toWalletAddress, amoun
       fee: { type: 'level', config: { feeLevel: 'LOW' } },
     });
 
-    const txId = response.data?.id;
-    if (!txId) throw new Error('No transaction ID returned');
+    const txId = response?.data?.id;
+    const txState = response?.data?.state;
+
+    if (!txId) {
+      throw new Error('No transaction ID returned');
+    }
+
+    const submittedMsg = `⏳ Transfer submitted: $${amount.toFixed(3)} USDC | id: ${txId} | state: ${txState}`;
+    console.log(submittedMsg);
+    events.push(createEvent('transfer_submitted', submittedMsg, {
+      transferId: txId,
+      amount,
+      from: fromWalletAddress,
+      to: toWalletAddress,
+      state: txState,
+    }));
+
+    await new Promise((r) => setTimeout(r, 1500));
 
     let txHash = null;
-    let state = response.data?.state;
-    const terminalStates = new Set(['COMPLETE', 'FAILED', 'CANCELLED', 'DENIED']);
+    let state = txState;
 
-    let attempts = 0;
-    while (!terminalStates.has(state) && attempts < 10) {
-      await new Promise((r) => setTimeout(r, 2000));
-      try {
-        const poll = await sdk.getTransaction({ id: txId });
-        state = poll.data?.transaction?.state;
-        txHash = poll.data?.transaction?.txHash;
-      } catch {
-        break;
-      }
-      attempts++;
+    try {
+      const poll = await sdk.getTransaction({ id: txId });
+      state = poll.data?.transaction?.state;
+      txHash = poll.data?.transaction?.txHash;
+    } catch (pollError) {
+      console.warn('⚠️ Poll failed, using initial state');
     }
 
     if (state === 'COMPLETE' && txHash) {
-      console.log(`✅ Real transfer: $${amount} USDC | tx: ${txHash}`);
-      return {
+      const confirmedMsg = `✅ Real transfer: $${amount.toFixed(3)} USDC | tx: ${txHash}`;
+      console.log(confirmedMsg);
+      events.push(createEvent('transfer_confirmed', confirmedMsg, {
+        transferId: txId,
+        txHash,
+        amount,
+        state: 'CONFIRMED',
+      }));
+
+      const payment = {
         id: txId,
         txHash,
         from: fromWalletAddress,
@@ -128,39 +246,80 @@ export async function sendUSDCTransfer(fromWalletAddress, toWalletAddress, amoun
         network: 'ARC-TESTNET',
         simulated: false,
       };
+
+      return { payment, events };
     }
 
-    throw new Error(`Transaction ended in state: ${state}`);
+    const pendingMsg = `⏳ Transfer processing: $${amount.toFixed(3)} USDC | id: ${txId} | state: ${state}`;
+    console.log(pendingMsg);
+    events.push(createEvent('transfer_pending', pendingMsg, {
+      transferId: txId,
+      txHash: txHash || null,
+      amount,
+      state: state || 'UNKNOWN',
+    }));
+
+    const payment = {
+      id: txId,
+      txHash: txHash || `pending_${txId}`,
+      from: fromWalletAddress,
+      to: toWalletAddress,
+      amount,
+      currency: 'USDC',
+      status: (state === 'INITIATED' || state === 'PENDING') ? 'pending' : 'confirmed',
+      timestamp: new Date().toISOString(),
+      blockExplorerUrl: txHash
+        ? `${EXPLORER_URL}/tx/${txHash}`
+        : `${EXPLORER_URL}/address/${fromWalletAddress}`,
+      memo,
+      network: 'ARC-TESTNET',
+      simulated: false,
+    };
+
+    return { payment, events };
+
   } catch (error) {
-    console.error(`Real transfer failed: ${error.message} — falling back to simulation`);
-    return simulateTransfer(fromWalletAddress, toWalletAddress, amount, memo);
-  }
-}
+    const errorMsg = `❌ Transfer error: ${error.message?.substring(0, 60)} — simulating`;
+    console.error(errorMsg);
+    events.push(createEvent('error', errorMsg, { error: error.message }));
 
-export async function getWalletBalance(walletId) {
-  const sdk = getClient();
-
-  if (!sdk) {
-    return { usdc: '1.000000' };
-  }
-
-  try {
-    const response = await sdk.getWalletTokenBalance({ id: walletId });
-    const balances = response.data?.tokenBalances || [];
-    const usdc = balances.find((b) => b.token?.symbol === 'USDC');
-    return { usdc: usdc?.amount || '0' };
-  } catch (error) {
-    console.error('Balance check failed:', error.message);
-    return { usdc: '0' };
+    const sim = await simulateTransfer(fromWalletAddress, toWalletAddress, amount, memo);
+    return {
+      payment: sim.payment,
+      events: [...events, ...sim.events],
+    };
   }
 }
 
 async function simulateTransfer(from, to, amount, memo) {
   const crypto = await import('crypto');
+  const events = [];
   const txHash = `0x${crypto.randomBytes(32).toString('hex')}`;
+  const transferId = `sim_${Date.now()}`;
 
-  return {
-    id: `sim_tx_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+  const submittedMsg = `⏳ Simulated transfer: $${amount.toFixed(3)} USDC | id: ${transferId}`;
+  console.log(submittedMsg);
+  events.push(createEvent('transfer_submitted', submittedMsg, {
+    transferId,
+    amount,
+    from,
+    to,
+    state: 'SIMULATED',
+  }));
+
+  await new Promise((r) => setTimeout(r, 300));
+
+  const confirmedMsg = `✅ Simulated transfer: $${amount.toFixed(3)} USDC | tx: ${txHash}`;
+  console.log(confirmedMsg);
+  events.push(createEvent('transfer_confirmed', confirmedMsg, {
+    transferId,
+    txHash,
+    amount,
+    state: 'CONFIRMED',
+  }));
+
+  const payment = {
+    id: transferId,
     txHash,
     from,
     to,
@@ -173,10 +332,12 @@ async function simulateTransfer(from, to, amount, memo) {
     network: 'ARC-TESTNET',
     simulated: true,
   };
+
+  return { payment, events };
 }
 
 export default {
   createAgentWallet,
   sendUSDCTransfer,
-  getWalletBalance,
+  fundWallet,
 };

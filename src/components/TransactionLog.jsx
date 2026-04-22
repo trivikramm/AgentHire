@@ -36,18 +36,24 @@ export default function TransactionLog({ transactions = [] }) {
                 <td className="py-3 text-gray-500">{i + 1}</td>
                 <td className="py-3">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs text-gray-400 max-w-[80px] truncate">
-                      {tx.from?.substring(0, 10)}...
-                    </span>
-                    <ArrowUpRight className="w-3 h-3 text-green-400" />
-                    <span className="font-mono text-xs text-gray-400 max-w-[80px] truncate">
-                      {tx.to?.substring(0, 10)}...
-                    </span>
+                    {(tx.from || tx.from_address) && (
+                      <>
+                        <span className="font-mono text-xs text-gray-400 max-w-[80px] truncate">
+                          {(tx.from || tx.from_address)?.substring(0, 10)}...
+                        </span>
+                        <ArrowUpRight className="w-3 h-3 text-green-400" />
+                      </>
+                    )}
+                    {(tx.to || tx.to_address) && (
+                      <span className="font-mono text-xs text-gray-400 max-w-[80px] truncate">
+                        {(tx.to || tx.to_address)?.substring(0, 10)}...
+                      </span>
+                    )}
                   </div>
                 </td>
                 <td className="py-3 text-right">
                   <span className="text-green-400 font-semibold">
-                    ${tx.amount?.toFixed(4)}
+                    ${(parseFloat(tx.amount) || 0).toFixed(4)}
                   </span>
                   <span className="text-gray-600 ml-1">USDC</span>
                 </td>
@@ -59,19 +65,21 @@ export default function TransactionLog({ transactions = [] }) {
                       ? 'bg-yellow-500/20 text-yellow-400'
                       : 'bg-red-500/20 text-red-400'
                   }`}>
-                    {tx.status}
+                    {tx.status || 'unknown'}
                   </span>
                 </td>
                 <td className="py-3 text-right">
-                  <a
-                    href={tx.blockExplorerUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 text-xs font-mono"
-                  >
-                    {tx.txHash?.substring(0, 10)}...
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
+                  {(tx.txHash || tx.tx_hash) && (
+                    <a
+                      href={tx.blockExplorerUrl || tx.block_explorer_url || `https://testnet.arcscan.app/tx/${tx.txHash || tx.tx_hash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 text-xs font-mono"
+                    >
+                      {(tx.txHash || tx.tx_hash)?.substring(0, 10)}...
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
                 </td>
               </motion.tr>
             ))}

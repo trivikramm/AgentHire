@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Toaster, toast } from 'react-hot-toast';
 import TaskCreator from '@/components/TaskCreator';
@@ -8,6 +8,7 @@ import PaymentFlow from '@/components/PaymentFlow';
 import TransactionLog from '@/components/TransactionLog';
 import LiveMetrics from '@/components/LiveMetrics';
 import TaskTimeline from '@/components/TaskTimeline';
+import TaskStatusBanner from '@/components/TaskStatusBanner';
 import { useAgents } from '@/hooks/useAgents';
 import { useTask } from '@/hooks/useTask';
 import { usePayments } from '@/hooks/usePayments';
@@ -17,45 +18,58 @@ import { Zap, RefreshCw } from 'lucide-react';
 export default function DashboardPage() {
   const { theme } = useTheme();
   const { agents, loading: agentsLoading, initAgents, refreshAgents } = useAgents();
-  const { task, loading: taskLoading, events, createTask } = useTask();
+  const { task, loading: taskLoading, events, taskStatus, summary: taskSummary, createTask, stopPolling } = useTask();
   const { transactions, totalVolume, refreshPayments } = usePayments();
-  const [initialized, setInitialized] = useState(false);
+  const initRef = useRef(false);
+  const prevStatus = useRef('idle');
 
   useEffect(() => {
-    if (!initialized) {
+    if (!initRef.current) {
+      initRef.current = true;
       handleInit();
     }
-  }, [initialized]);
+  }, []);
+
+  useEffect(() => {
+    if (prevStatus.current === 'running' && taskStatus === 'completed') {
+      toast.success(
+        `Task completed! ${taskSummary?.transactionCount || 0} payments | $${(taskSummary?.totalCost || 0).toFixed(4)} USDC`,
+        { id: 'task', duration: 8000 }
+      );
+      refreshAgents();
+      refreshPayments();
+    } else if (prevStatus.current === 'running' && taskStatus === 'failed') {
+      toast.error('Task failed', { id: 'task' });
+    }
+    prevStatus.current = taskStatus;
+  }, [taskStatus, taskSummary, refreshAgents, refreshPayments]);
 
   const handleInit = async () => {
     toast.loading('Initializing agent network...', { id: 'init' });
     try {
       await initAgents();
       toast.success('Agent network ready!', { id: 'init' });
-      setInitialized(true);
     } catch (error) {
       toast.error('Failed to initialize agents', { id: 'init' });
     }
   };
 
   const handleCreateTask = async (description) => {
+    if (!description?.trim()) return;
+
     toast.loading('Agents are working on your task...', { id: 'task' });
+
     try {
-      const result = await createTask(description);
-      if (result?.status === 'completed') {
-        toast.success(
-          `Task completed! ${result.payments.length} payments totaling $${result.totalCost.toFixed(4)} USDC`,
-          { id: 'task', duration: 5000 }
-        );
-      } else if (result?.status === 'failed') {
-        toast.error('Task failed: ' + (result.error || 'Unknown error'), { id: 'task' });
-      }
-      await refreshAgents();
-      await refreshPayments();
+      await createTask(description);
     } catch (error) {
+      console.error('Task creation error:', error);
       toast.error('Error creating task', { id: 'task' });
     }
   };
+
+  const handleDismissBanner = useCallback(() => {
+    // Don't stop polling - let polling complete
+  }, []);
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg-primary)' }}>
@@ -69,6 +83,13 @@ export default function DashboardPage() {
             boxShadow: theme === 'light' ? '0 4px 12px rgba(0,0,0,0.08)' : '0 4px 12px rgba(0,0,0,0.4)',
           },
         }}
+      />
+
+      {/* Task Status Banner */}
+      <TaskStatusBanner
+        status={taskStatus}
+        summary={taskSummary}
+        onDismiss={handleDismissBanner}
       />
 
       <div className="max-w-7xl mx-auto px-4 pt-8 pb-4">
@@ -107,17 +128,19 @@ export default function DashboardPage() {
 
             {task && <TaskTimeline task={task} />}
 
+            <PaymentFlow
+              events={events}
+              payments={task?.payments || []}
+              status={taskStatus}
+              summary={taskSummary}
+            />
+
             {(task?.payments?.length > 0 || transactions.length > 0) && (
               <TransactionLog transactions={task?.payments || transactions} />
             )}
           </div>
 
           <div className="space-y-6">
-            <PaymentFlow
-              events={task?.events || events}
-              payments={task?.payments || []}
-            />
-
             <AgentNetwork agents={agents} />
           </div>
         </div>

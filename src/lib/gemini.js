@@ -10,7 +10,7 @@ function getModel() {
 
   try {
     const genAI = new GoogleGenerativeAI(GEMINI_KEY);
-    return genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    return genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
   } catch (e) {
     console.error('Gemini init error:', e.message);
     return null;

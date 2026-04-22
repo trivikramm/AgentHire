@@ -12,7 +12,9 @@ export default function LiveMetrics({ task, transactions = [] }) {
 
   const duration = task?.startTime && task?.endTime
     ? ((new Date(task.endTime) - new Date(task.startTime)) / 1000).toFixed(1)
-    : '—';
+    : task?.duration
+      ? Number(task.duration).toFixed(1)
+      : '—';
 
   const stats = [
     {

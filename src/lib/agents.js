@@ -11,30 +11,58 @@ import {
 if (!global.agentRegistry) global.agentRegistry = {};
 if (!global.taskRegistry) global.taskRegistry = {};
 
-export function getAgentRegistry() {
-  try {
-    const dbAgents = getAgents();
-    if (Object.keys(dbAgents).length > 0) {
-      global.agentRegistry = dbAgents;
-      return dbAgents;
-    }
-  } catch (e) {
-    console.error('DB read error:', e.message);
+// ============================================
+// 🔒 Singleton Registry Guard
+// ============================================
+let initPromise = null;
+
+export async function getAgentRegistry() {
+  // Return cached if available
+  if (global.agentRegistry && Object.keys(global.agentRegistry).length > 0) {
+    return global.agentRegistry;
   }
-  return global.agentRegistry;
+
+  // If initialization already in progress, await it
+  if (initPromise) {
+    return initPromise;
+  }
+
+  // Start initialization
+  initPromise = (async () => {
+    try {
+      const dbAgents = await getAgents();
+      if (Object.keys(dbAgents).length > 0) {
+        console.log('♻️ Loaded agents from database');
+        global.agentRegistry = dbAgents;
+        return dbAgents;
+      }
+
+      // No agents in DB — create fresh
+      const agents = await initializeAgents();
+      global.agentRegistry = agents;
+      return agents;
+    } catch (e) {
+      console.error('DB read error:', e.message);
+      return global.agentRegistry || {};
+    } finally {
+      initPromise = null;
+    }
+  })();
+
+  return initPromise;
 }
 
-export function getTransactionLog() {
+export async function getTransactionLog() {
   try {
-    return getTransactions(200);
+    return await getTransactions(200);
   } catch {
     return global.transactionLog || [];
   }
 }
 
-export function getStats() {
+export async function getStats() {
   try {
-    return getDashboardStats();
+    return await getDashboardStats();
   } catch {
     return null;
   }
@@ -44,11 +72,12 @@ export function getTaskRegistry() {
   return global.taskRegistry || {};
 }
 
-export async function initializeAgents() {
+// Internal: actual initialization logic (separated for reuse)
+async function initializeAgents() {
   const agents = {};
 
   try {
-    clearAgents();
+    await clearAgents();
   } catch (e) {
     console.error('Clear error:', e.message);
   }
@@ -56,11 +85,10 @@ export async function initializeAgents() {
   const walletSetId = process.env.CIRCLE_WALLET_SET_ID;
 
   for (const [type, config] of Object.entries(AGENT_TYPES)) {
-    const agentId = `agent_${type.toLowerCase()}_${Date.now()}`;
     const wallet = await createAgentWallet(walletSetId, config.name);
 
     const agent = {
-      id: agentId,
+      id: `agent_${type.toLowerCase()}_${Date.now()}`,
       type,
       ...config,
       wallet: {
@@ -78,7 +106,7 @@ export async function initializeAgents() {
     agents[type] = agent;
 
     try {
-      saveAgent(agent);
+      await saveAgent(agent);
     } catch (e) {
       console.error('Save agent error:', e.message);
     }
@@ -86,15 +114,14 @@ export async function initializeAgents() {
     console.log(`🤖 ${config.emoji} ${config.name}: ${wallet.address} ${wallet.simulated ? '(sim)' : '(REAL)'}`);
   }
 
-  global.agentRegistry = agents;
-
   return agents;
 }
 
-export async function executeTask(taskDescription) {
-  const taskId = uuidv4();
+export async function executeTask(taskDescription, options = {}) {
+  const taskId = options.taskId || uuidv4();
+  const backgroundMode = options.background === true;
 
-  let agents = getAgentRegistry();
+  let agents = await getAgentRegistry();
   if (!agents || Object.keys(agents).length === 0) {
     agents = await initializeAgents();
   }
@@ -110,43 +137,62 @@ export async function executeTask(taskDescription) {
     results: [],
     totalCost: 0,
     startTime: new Date().toISOString(),
+    _startMs: Date.now(),
     endTime: null,
     events: [],
     review: null,
   };
 
-  try {
-    saveTask(task);
-  } catch (e) {
-    console.error('Save task error:', e.message);
+  // Only save task in background mode if not already saved
+  if (backgroundMode) {
+    try {
+      await saveTask(task);
+    } catch (e) {
+      console.error('Save task error:', e.message);
+    }
   }
 
-  const addEvent = (event) => {
+  const addEvent = async (event) => {
     const e = { ...event, timestamp: new Date().toISOString() };
     task.events.push(e);
     try {
-      saveEvent(taskId, e);
+      await saveEvent(taskId, e);
     } catch (err) {
       /* silent */
     }
   };
 
   async function makePayment(fromAddress, toAddress, amount, memo, fromLabel = '', toLabel = '', txType = 'payment') {
-    const payment = await sendUSDCTransfer(fromAddress, toAddress, amount, memo);
+    const { payment, events: transferEvents } = await sendUSDCTransfer(fromAddress, toAddress, amount, memo);
     task.payments.push(payment);
     task.totalCost += amount;
 
     try {
-      saveTransaction(payment, taskId, fromLabel, toLabel, txType);
+      await saveTransaction(payment, taskId, fromLabel, toLabel, txType);
     } catch (e) {
       console.error('Save tx error:', e.message);
+    }
+
+    // Add all transfer events to task timeline
+    for (const evt of transferEvents) {
+      const enriched = {
+        ...evt,
+        payment: {
+          id: payment.id,
+          txHash: payment.txHash,
+          amount: payment.amount,
+          status: payment.status,
+          simulated: payment.simulated,
+        },
+      };
+      await addEvent(enriched);
     }
 
     return payment;
   }
 
   try {
-    addEvent({
+    await addEvent({
       type: 'decomposing',
       message: '🧠 Manager Agent analyzing your task...',
     });
@@ -166,7 +212,7 @@ export async function executeTask(taskDescription) {
     task.subtasks = decomposition.subtasks;
     task.status = 'hiring';
 
-    addEvent({
+    await addEvent({
       type: 'decomposed',
       message: `📋 Task broken into ${decomposition.subtasks.length} subtasks`,
     });
@@ -182,10 +228,10 @@ export async function executeTask(taskDescription) {
         'Manager Agent',
         'payment'
       );
-      addEvent({
+      await addEvent({
         type: 'payment',
         message: `💰 Paid Manager $${AGENT_TYPES.MANAGER.costPerAction} USDC for task analysis`,
-        payment: p,
+        payment: { id: p.id, txHash: p.txHash, amount: p.amount, status: p.status },
       });
     }
 
@@ -197,7 +243,7 @@ export async function executeTask(taskDescription) {
       const config = AGENT_TYPES[agentType];
       if (!agent || !config) continue;
 
-      addEvent({
+      await addEvent({
         type: 'hiring',
         message: `🤝 Hiring ${config.emoji} ${config.name} for: ${subtask.title}`,
       });
@@ -213,15 +259,15 @@ export async function executeTask(taskDescription) {
           config.name,
           'payment'
         );
-        addEvent({
+        await addEvent({
           type: 'payment',
           message: `💸 #${task.payments.length}: $${config.costPerAction} → ${config.emoji} ${config.name} (${a + 1}/${actions})`,
-          payment: p,
+          payment: { id: p.id, txHash: p.txHash, amount: p.amount, status: p.status },
         });
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 50));
       }
 
-      addEvent({
+      await addEvent({
         type: 'executing',
         message: `⚡ ${config.emoji} ${config.name} working...`,
       });
@@ -246,12 +292,12 @@ export async function executeTask(taskDescription) {
       agent.status = 'idle';
 
       try {
-        updateAgentStats(agentType, agent.tasksCompleted, agent.totalEarned);
+        await updateAgentStats(agentType, agent.tasksCompleted, agent.totalEarned);
       } catch {
         /* silent */
       }
 
-      addEvent({
+      await addEvent({
         type: 'completed',
         message: `✅ ${config.emoji} ${config.name} completed: ${subtask.title}`,
         result: typeof result === 'string' ? result.substring(0, 200) : 'Done',
@@ -267,10 +313,10 @@ export async function executeTask(taskDescription) {
           'Researcher Agent',
           'subcontract'
         );
-        addEvent({
+        await addEvent({
           type: 'subcontract',
           message: `🔄 💻 Coder → 🔍 Researcher $0.002`,
-          payment: sp,
+          payment: { id: sp.id, txHash: sp.txHash, amount: sp.amount, status: sp.status },
         });
       }
 
@@ -284,16 +330,16 @@ export async function executeTask(taskDescription) {
           'Analyst Agent',
           'subcontract'
         );
-        addEvent({
+        await addEvent({
           type: 'subcontract',
           message: `🔄 ✍️ Writer → 📊 Analyst $0.003`,
-          payment: sp,
+          payment: { id: sp.id, txHash: sp.txHash, amount: sp.amount, status: sp.status },
         });
       }
     }
 
     task.status = 'reviewing';
-    addEvent({
+    await addEvent({
       type: 'reviewing',
       message: '🧠 Manager reviewing results...',
     });
@@ -308,10 +354,10 @@ export async function executeTask(taskDescription) {
         'Manager Agent',
         'payment'
       );
-      addEvent({
+      await addEvent({
         type: 'payment',
         message: `💰 Paid Manager $${AGENT_TYPES.MANAGER.costPerAction} for review`,
-        payment: rp,
+        payment: { id: rp.id, txHash: rp.txHash, amount: rp.amount, status: rp.status },
       });
     }
 
@@ -325,19 +371,20 @@ export async function executeTask(taskDescription) {
     task.review = review;
     task.status = 'completed';
     task.endTime = new Date().toISOString();
+    task.durationSeconds = (Date.now() - task._startMs) / 1000;
 
     try {
-      saveTask(task);
+      await saveTask(task);
     } catch {
       /* silent */
     }
 
-    addEvent({
+    await addEvent({
       type: 'review_complete',
       message: `📊 Score: ${review.score}/10 — ${review.summary}`,
     });
 
-    addEvent({
+    await addEvent({
       type: 'task_complete',
       message: `🎉 Done! $${task.totalCost.toFixed(4)} USDC | ${task.payments.length} payments | ${task.payments.filter(p => !p.simulated).length} on-chain`,
     });
@@ -348,11 +395,11 @@ export async function executeTask(taskDescription) {
     task.error = error.message;
     task.endTime = new Date().toISOString();
     try {
-      saveTask(task);
+      await saveTask(task);
     } catch {
       /* silent */
     }
-    addEvent({ type: 'error', message: `❌ ${error.message}` });
+    await addEvent({ type: 'error', message: `❌ ${error.message}` });
     return task;
   }
 }

@@ -1,133 +1,69 @@
-import Database from 'better-sqlite3';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { createClient } from '@supabase/supabase-js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DB_PATH = path.join(process.cwd(), 'agenthire.db');
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-let db = null;
+let supabase = null;
+let hasWarned = false;
 
 function getDB() {
-  if (db) return db;
+  if (supabase) return supabase;
 
-  db = new Database(DB_PATH);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+  if (!supabaseUrl || !supabaseKey || supabaseUrl === 'your_supabase_url') {
+    if (!hasWarned) {
+      console.warn('⚠️ Supabase not configured — add SUPABASE_URL and SUPABASE_SERVICE_KEY to .env.local');
+      hasWarned = true;
+    }
+    return null;
+  }
 
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS agents (
-      id TEXT PRIMARY KEY,
-      type TEXT NOT NULL,
-      name TEXT NOT NULL,
-      role TEXT,
-      emoji TEXT,
-      wallet_id TEXT,
-      wallet_address TEXT,
-      blockchain TEXT DEFAULT 'ARC-TESTNET',
-      simulated INTEGER DEFAULT 0,
-      status TEXT DEFAULT 'idle',
-      tasks_completed INTEGER DEFAULT 0,
-      total_earned REAL DEFAULT 0,
-      cost_per_action REAL DEFAULT 0,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS tasks (
-      id TEXT PRIMARY KEY,
-      description TEXT NOT NULL,
-      status TEXT DEFAULT 'pending',
-      total_cost REAL DEFAULT 0,
-      payment_count INTEGER DEFAULT 0,
-      subtask_count INTEGER DEFAULT 0,
-      review_score INTEGER,
-      review_summary TEXT,
-      start_time TEXT,
-      end_time TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS subtasks (
-      id TEXT PRIMARY KEY,
-      task_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT,
-      assigned_agent TEXT,
-      estimated_actions INTEGER DEFAULT 2,
-      priority INTEGER DEFAULT 1,
-      status TEXT DEFAULT 'pending',
-      result TEXT,
-      completed_at TEXT,
-      FOREIGN KEY (task_id) REFERENCES tasks(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS transactions (
-      id TEXT PRIMARY KEY,
-      task_id TEXT,
-      tx_hash TEXT,
-      from_address TEXT,
-      to_address TEXT,
-      from_label TEXT,
-      to_label TEXT,
-      amount REAL NOT NULL,
-      currency TEXT DEFAULT 'USDC',
-      status TEXT DEFAULT 'confirmed',
-      tx_type TEXT DEFAULT 'payment',
-      memo TEXT,
-      network TEXT DEFAULT 'ARC-TESTNET',
-      simulated INTEGER DEFAULT 0,
-      block_explorer_url TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      task_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      message TEXT NOT NULL,
-      payment_id TEXT,
-      data TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (task_id) REFERENCES tasks(id)
-    );
-  `);
-
-  console.log('✅ Database initialized at:', DB_PATH);
-  return db;
+  supabase = createClient(supabaseUrl, supabaseKey);
+  console.log('✅ Supabase connected:', supabaseUrl);
+  return supabase;
 }
 
-export function saveAgent(agent) {
-  const db = getDB();
-  const stmt = db.prepare(`
-    INSERT OR REPLACE INTO agents 
-    (id, type, name, role, emoji, wallet_id, wallet_address, blockchain, simulated, status, tasks_completed, total_earned, cost_per_action, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+// ===== AGENT OPERATIONS =====
 
-  stmt.run(
-    agent.id,
-    agent.type,
-    agent.name,
-    agent.role,
-    agent.emoji,
-    agent.wallet?.id,
-    agent.wallet?.address,
-    agent.wallet?.blockchain || 'ARC-TESTNET',
-    agent.wallet?.simulated ? 1 : 0,
-    agent.status || 'idle',
-    agent.tasksCompleted || 0,
-    agent.totalEarned || 0,
-    agent.costPerAction || 0,
-    agent.createdAt || new Date().toISOString()
-  );
+export async function saveAgent(agent) {
+  const db = getDB();
+  if (!db) return;
+
+  const { error } = await db.from('agents').upsert({
+    id: agent.id,
+    type: agent.type,
+    name: agent.name,
+    role: agent.role,
+    emoji: agent.emoji,
+    wallet_id: agent.wallet?.id,
+    wallet_address: agent.wallet?.address,
+    blockchain: agent.wallet?.blockchain || 'ARC-TESTNET',
+    simulated: agent.wallet?.simulated || false,
+    status: agent.status || 'idle',
+    tasks_completed: agent.tasksCompleted || 0,
+    total_earned: agent.totalEarned || 0,
+    cost_per_action: agent.costPerAction || 0,
+    created_at: agent.createdAt || new Date().toISOString(),
+  });
+
+  if (error) console.error('Save agent error:', error.message);
 }
 
-export function getAgents() {
+export async function getAgents() {
   const db = getDB();
-  const rows = db.prepare('SELECT * FROM agents ORDER BY created_at DESC').all();
+  if (!db) return {};
+
+  const { data, error } = await db
+    .from('agents')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Get agents error:', error.message);
+    return {};
+  }
 
   const agents = {};
-  for (const row of rows) {
+  for (const row of data || []) {
     agents[row.type] = {
       id: row.id,
       type: row.type,
@@ -138,162 +74,240 @@ export function getAgents() {
         id: row.wallet_id,
         address: row.wallet_address,
         blockchain: row.blockchain,
-        simulated: row.simulated === 1,
+        simulated: row.simulated,
       },
       status: row.status,
       tasksCompleted: row.tasks_completed,
-      totalEarned: row.total_earned,
-      costPerAction: row.cost_per_action,
+      totalEarned: parseFloat(row.total_earned) || 0,
+      costPerAction: parseFloat(row.cost_per_action) || 0,
       createdAt: row.created_at,
     };
   }
   return agents;
 }
 
-export function updateAgentStats(agentType, tasksCompleted, totalEarned, status = 'idle') {
+export async function updateAgentStats(agentType, tasksCompleted, totalEarned, status = 'idle') {
   const db = getDB();
-  db.prepare(`
-    UPDATE agents SET tasks_completed = ?, total_earned = ?, status = ? WHERE type = ?
-  `).run(tasksCompleted, totalEarned, status, agentType);
+  if (!db) return;
+
+  const { error } = await db
+    .from('agents')
+    .update({
+      tasks_completed: tasksCompleted,
+      total_earned: totalEarned,
+      status,
+    })
+    .eq('type', agentType);
+
+  if (error) console.error('Update agent error:', error.message);
 }
 
-export function clearAgents() {
+export async function clearAgents() {
   const db = getDB();
-  db.prepare('DELETE FROM agents').run();
+  if (!db) return;
+
+  const { error } = await db.from('agents').delete().neq('id', '');
+  if (error) console.error('Clear agents error:', error.message);
 }
 
-export function saveTask(task) {
+// ===== TASK OPERATIONS =====
+
+export async function saveTask(task) {
   const db = getDB();
-  db.prepare(`
-    INSERT OR REPLACE INTO tasks 
-    (id, description, status, total_cost, payment_count, subtask_count, review_score, review_summary, start_time, end_time)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    task.id,
-    task.description,
-    task.status,
-    task.totalCost || 0,
-    task.payments?.length || 0,
-    task.results?.length || task.subtasks?.length || 0,
-    task.review?.score || null,
-    task.review?.summary || null,
-    task.startTime || null,
-    task.endTime || null
-  );
+  if (!db) return;
+
+  const { error } = await db.from('tasks').upsert({
+    id: task.id,
+    description: task.description,
+    status: task.status,
+    total_cost: task.totalCost || 0,
+    payment_count: task.payments?.length || 0,
+    transaction_count: task.payments?.filter((p) => !p.simulated).length || 0,
+    subtask_count: task.results?.length || task.subtasks?.length || 0,
+    subtasks_data: task.subtasks ? JSON.stringify(task.subtasks) : null,
+    results_data: task.results ? JSON.stringify(task.results) : null,
+    review_score: task.review?.score || null,
+    review_summary: task.review?.summary || null,
+    review_data: task.review ? JSON.stringify(task.review) : null,
+    start_time: task.startTime || null,
+    end_time: task.endTime || null,
+    duration_seconds: task.durationSeconds || null,
+  });
+
+  if (error) console.error('Save task error:', error.message);
 }
 
-export function getTasks() {
+export async function getTasks() {
   const db = getDB();
-  return db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all();
+  if (!db) return [];
+
+  const { data, error } = await db
+    .from('tasks')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Get tasks error:', error.message);
+    return [];
+  }
+  return data || [];
 }
 
-export function saveTransaction(tx, taskId = null, fromLabel = '', toLabel = '', txType = 'payment') {
+// ===== TRANSACTION OPERATIONS =====
+
+export async function saveTransaction(tx, taskId = null, fromLabel = '', toLabel = '', txType = 'payment') {
   const db = getDB();
-  db.prepare(`
-    INSERT OR REPLACE INTO transactions 
-    (id, task_id, tx_hash, from_address, to_address, from_label, to_label, amount, currency, status, tx_type, memo, network, simulated, block_explorer_url, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    tx.id,
-    taskId,
-    tx.txHash,
-    tx.from,
-    tx.to,
-    fromLabel,
-    toLabel,
-    tx.amount,
-    tx.currency || 'USDC',
-    tx.status || 'confirmed',
-    txType,
-    tx.memo || '',
-    tx.network || 'ARC-TESTNET',
-    tx.simulated ? 1 : 0,
-    tx.blockExplorerUrl || '',
-    tx.timestamp || new Date().toISOString()
-  );
+  if (!db) return;
+
+  const { error } = await db.from('transactions').upsert({
+    id: tx.id,
+    task_id: taskId,
+    tx_hash: tx.txHash,
+    from_address: tx.from,
+    to_address: tx.to,
+    from_label: fromLabel,
+    to_label: toLabel,
+    amount: tx.amount,
+    currency: tx.currency || 'USDC',
+    status: tx.status || 'confirmed',
+    tx_type: txType,
+    memo: tx.memo || '',
+    network: tx.network || 'ARC-TESTNET',
+    simulated: tx.simulated || false,
+    block_explorer_url: tx.blockExplorerUrl || '',
+    created_at: tx.timestamp || new Date().toISOString(),
+  });
+
+  if (error) console.error('Save tx error:', error.message);
 }
 
-export function getTransactions(limit = 200) {
+export async function getTransactions(limit = 200) {
   const db = getDB();
-  return db.prepare('SELECT * FROM transactions ORDER BY created_at DESC LIMIT ?').all(limit);
+  if (!db) return [];
+
+  const { data, error } = await db
+    .from('transactions')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error('Get transactions error:', error.message);
+    return [];
+  }
+  return data || [];
 }
 
-export function getTransactionsByTask(taskId) {
+export async function getTransactionsByTask(taskId) {
   const db = getDB();
-  return db.prepare('SELECT * FROM transactions WHERE task_id = ? ORDER BY created_at ASC').all(taskId);
+  if (!db) return [];
+
+  const { data, error } = await db
+    .from('transactions')
+    .select('*')
+    .eq('task_id', taskId)
+    .order('created_at', { ascending: true });
+
+  if (error) return [];
+  return data || [];
 }
 
-export function getTransactionStats() {
+export async function getTransactionStats() {
   const db = getDB();
-  const stats = db.prepare(`
-    SELECT 
-      COUNT(*) as total_count,
-      COALESCE(SUM(amount), 0) as total_volume,
-      COALESCE(AVG(amount), 0) as avg_amount,
-      SUM(CASE WHEN simulated = 0 THEN 1 ELSE 0 END) as onchain_count,
-      SUM(CASE WHEN simulated = 1 THEN 1 ELSE 0 END) as simulated_count,
-      SUM(CASE WHEN tx_type = 'subcontract' THEN 1 ELSE 0 END) as subcontract_count
-    FROM transactions
-  `).get();
+  if (!db) return { total_count: 0, total_volume: 0, avg_amount: 0, onchain_count: 0, simulated_count: 0, subcontract_count: 0 };
 
-  return stats;
-}
+  const { data, error } = await db.from('transactions').select('amount, simulated, tx_type');
 
-export function saveEvent(taskId, event) {
-  const db = getDB();
-  db.prepare(`
-    INSERT INTO events (task_id, type, message, payment_id, data, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(
-    taskId,
-    event.type,
-    event.message,
-    event.payment?.id || null,
-    event.data ? JSON.stringify(event.data) : null,
-    event.timestamp || new Date().toISOString()
-  );
-}
+  if (error) {
+    console.error('Get stats error:', error.message);
+    return { total_count: 0, total_volume: 0, avg_amount: 0, onchain_count: 0, simulated_count: 0, subcontract_count: 0 };
+  }
 
-export function getEventsByTask(taskId) {
-  const db = getDB();
-  return db.prepare('SELECT * FROM events WHERE task_id = ? ORDER BY id ASC').all(taskId);
-}
-
-export function getDashboardStats() {
-  const db = getDB();
-
-  const taskStats = db.prepare(`
-    SELECT 
-      COUNT(*) as total_tasks,
-      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_tasks,
-      COALESCE(SUM(total_cost), 0) as total_spent
-    FROM tasks
-  `).get();
-
-  const txStats = getTransactionStats();
-
-  const agentStats = db.prepare(`
-    SELECT 
-      COUNT(*) as total_agents,
-      COALESCE(SUM(tasks_completed), 0) as total_agent_tasks,
-      COALESCE(SUM(total_earned), 0) as total_agent_earned
-    FROM agents
-  `).get();
+  const rows = data || [];
+  const totalVolume = rows.reduce((sum, r) => sum + parseFloat(r.amount), 0);
 
   return {
-    tasks: taskStats,
-    transactions: txStats,
-    agents: agentStats,
+    total_count: rows.length,
+    total_volume: totalVolume,
+    avg_amount: rows.length > 0 ? totalVolume / rows.length : 0,
+    onchain_count: rows.filter(r => !r.simulated).length,
+    simulated_count: rows.filter(r => r.simulated).length,
+    subcontract_count: rows.filter(r => r.tx_type === 'subcontract').length,
   };
 }
 
-export function resetDatabase() {
+// ===== EVENT OPERATIONS =====
+
+export async function saveEvent(taskId, event) {
   const db = getDB();
-  db.prepare('DELETE FROM events').run();
-  db.prepare('DELETE FROM transactions').run();
-  db.prepare('DELETE FROM subtasks').run();
-  db.prepare('DELETE FROM tasks').run();
-  db.prepare('DELETE FROM agents').run();
+  if (!db) return;
+
+  const { error } = await db.from('events').insert({
+    task_id: taskId,
+    type: event.type,
+    message: event.message,
+    payment_id: event.payment?.id || null,
+    data: event.data || null,
+    created_at: event.timestamp || new Date().toISOString(),
+  });
+
+  if (error) console.error('Save event error:', error.message);
+}
+
+export async function getEventsByTask(taskId) {
+  const db = getDB();
+  if (!db) return [];
+
+  const { data, error } = await db
+    .from('events')
+    .select('*')
+    .eq('task_id', taskId)
+    .order('id', { ascending: true });
+
+  if (error) return [];
+  return data || [];
+}
+
+// ===== DASHBOARD STATS =====
+
+export async function getDashboardStats() {
+  const db = getDB();
+  if (!db) return null;
+
+  const [tasksRes, txStats, agentsRes] = await Promise.all([
+    db.from('tasks').select('status, total_cost'),
+    getTransactionStats(),
+    db.from('agents').select('tasks_completed, total_earned'),
+  ]);
+
+  const tasks = tasksRes.data || [];
+  const agents = agentsRes.data || [];
+
+  return {
+    tasks: {
+      total_tasks: tasks.length,
+      completed_tasks: tasks.filter(t => t.status === 'completed').length,
+      total_spent: tasks.reduce((sum, t) => sum + parseFloat(t.total_cost || 0), 0),
+    },
+    transactions: txStats,
+    agents: {
+      total_agents: agents.length,
+      total_agent_tasks: agents.reduce((sum, a) => sum + (a.tasks_completed || 0), 0),
+      total_agent_earned: agents.reduce((sum, a) => sum + parseFloat(a.total_earned || 0), 0),
+    },
+  };
+}
+
+// ===== RESET =====
+
+export async function resetDatabase() {
+  const db = getDB();
+  if (!db) return;
+
+  await db.from('events').delete().neq('id', 0);
+  await db.from('transactions').delete().neq('id', '');
+  await db.from('tasks').delete().neq('id', '');
+  await db.from('agents').delete().neq('id', '');
   console.log('🗑️ Database reset complete');
 }
 

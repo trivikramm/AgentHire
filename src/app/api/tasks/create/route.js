@@ -37,14 +37,21 @@ async function processTaskInBackground(taskId, taskDescription, startTime, db) {
     console.log('='.repeat(60) + '\n');
 
     if (db) {
+      const endTimeISO = new Date(endTimeMs).toISOString();
       await db.from('tasks').update({
         status: task.status === 'completed' ? 'completed' : 'failed',
-        completed_at: new Date().toISOString(),
-        end_time: new Date().toISOString(),
+        completed_at: endTimeISO,
+        end_time: endTimeISO,
         total_cost: totalCost,
         duration_seconds: parseFloat(duration),
         subtask_count: subtaskCount,
         transaction_count: txCount,
+        payment_count: (task.payments || []).length,
+        subtasks_data: task.subtasks ? JSON.stringify(task.subtasks) : null,
+        results_data: task.results ? JSON.stringify(task.results) : null,
+        review_data: task.review ? JSON.stringify(task.review) : null,
+        review_score: task.review?.score || null,
+        review_summary: task.review?.summary || null,
       }).eq('id', taskId);
 
       if (task.events && task.events.length > 0) {
@@ -118,6 +125,7 @@ export async function POST(req) {
         duration_seconds: 0,
         subtask_count: 0,
         transaction_count: 0,
+        payment_count: 0,
       });
     }
 
@@ -129,6 +137,7 @@ export async function POST(req) {
       success: true,
       taskId,
       status: 'running',
+      startTime: new Date().toISOString(),
       message: `Task started — poll /api/tasks/status?taskId=${taskId}`,
     });
 

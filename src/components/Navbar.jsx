@@ -2,12 +2,19 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Menu, X, Zap, BarChart3, Sun, Moon } from 'lucide-react';
+import { Menu, X, Zap, BarChart3, Sun, Moon, ListFilter, Activity } from 'lucide-react';
 import { useTheme } from '@/context/ThemeContext';
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
+
+  const navLinks = [
+    { href: '/', label: 'Home' },
+    { href: '/dashboard', label: 'Dashboard', icon: Zap },
+    { href: '/tasks', label: 'Tasks', icon: ListFilter },
+    { href: '/analytics', label: 'Analytics', icon: BarChart3 },
+  ];
 
   return (
     <nav className="fixed top-0 w-full z-50 backdrop-blur-xl border-b"
@@ -25,17 +32,23 @@ export default function Navbar() {
             <span className="text-xl font-bold gradient-text">AgentHire</span>
           </Link>
 
-          <div className="hidden md:flex items-center space-x-6">
-            <Link href="/" className="theme-text-secondary hover:theme-text transition-colors">Home</Link>
-            <Link href="/dashboard" className="theme-text-secondary hover:theme-text transition-colors flex items-center gap-2">
-              <BarChart3 className="w-4 h-4" />
-              Dashboard
-            </Link>
+          <div className="hidden md:flex items-center space-x-2">
+            {navLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="theme-text-secondary hover:theme-text transition-colors flex items-center gap-2 px-3 py-2 rounded-xl text-sm"
+              >
+                {link.icon && <link.icon className="w-4 h-4" />}
+                {link.label}
+              </Link>
+            ))}
+
             <a
               href="https://testnet.arcscan.app"
               target="_blank"
               rel="noopener noreferrer"
-              className="theme-text-secondary hover:theme-text transition-colors"
+              className="theme-text-secondary hover:theme-text transition-colors px-3 py-2 rounded-xl text-sm"
             >
               Arc Explorer ↗
             </a>
@@ -93,9 +106,28 @@ export default function Navbar() {
             borderBottom: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.08)'}`,
           }}
         >
-          <Link href="/" className="block theme-text-secondary hover:theme-text py-2">Home</Link>
-          <Link href="/dashboard" className="block theme-text-secondary hover:theme-text py-2">Dashboard</Link>
-          <Link href="/dashboard" className="block btn-primary text-center text-sm">Launch App</Link>
+          {navLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="block theme-text-secondary hover:theme-text py-2"
+              onClick={() => setIsOpen(false)}
+            >
+              {link.icon && <link.icon className="w-4 h-4 inline mr-2" />}
+              {link.label}
+            </Link>
+          ))}
+          <a
+            href="https://testnet.arcscan.app"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block theme-text-secondary hover:theme-text py-2"
+          >
+            Arc Explorer ↗
+          </a>
+          <Link href="/dashboard" className="block btn-primary text-center text-sm" onClick={() => setIsOpen(false)}>
+            Launch App
+          </Link>
         </motion.div>
       )}
     </nav>

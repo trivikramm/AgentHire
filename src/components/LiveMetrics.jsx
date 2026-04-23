@@ -1,20 +1,25 @@
 'use client';
 import { motion } from 'framer-motion';
-import { TrendingUp, DollarSign, Zap, Activity, Clock, BarChart3 } from 'lucide-react';
+import { DollarSign, Zap, Activity, Clock, BarChart3, TrendingUp, Timer } from 'lucide-react';
 import { calculateMarginAnalysis } from '@/lib/payments';
 
-export default function LiveMetrics({ task, transactions = [] }) {
-  const totalVolume = transactions.reduce((sum, tx) => sum + tx.amount, 0);
+export default function LiveMetrics({ task, transactions = [], elapsedTime = 0, isRunning = false }) {
+  const totalVolume = transactions.reduce((sum, tx) => sum + (parseFloat(tx.amount) || 0), 0);
   const txCount = transactions.length;
   const avgCost = txCount > 0 ? totalVolume / txCount : 0;
 
   const margin = txCount > 0 ? calculateMarginAnalysis(totalVolume, txCount) : null;
 
-  const duration = task?.startTime && task?.endTime
-    ? ((new Date(task.endTime) - new Date(task.startTime)) / 1000).toFixed(1)
-    : task?.duration
-      ? Number(task.duration).toFixed(1)
-      : '—';
+  let duration;
+  if (task?.startTime && task?.endTime) {
+    duration = ((new Date(task.endTime) - new Date(task.startTime)) / 1000).toFixed(1);
+  } else if (task?.duration && task.duration > 0) {
+    duration = Number(task.duration).toFixed(1);
+  } else if (isRunning && elapsedTime > 0) {
+    duration = elapsedTime.toFixed(1);
+  } else {
+    duration = null;
+  }
 
   const stats = [
     {
@@ -42,12 +47,13 @@ export default function LiveMetrics({ task, transactions = [] }) {
       bgColor: 'bg-purple-500/10',
     },
     {
-      icon: Clock,
+      icon: isRunning ? Timer : Clock,
       label: 'Duration',
-      value: `${duration}s`,
-      sub: 'total time',
-      color: 'text-blue-400',
-      bgColor: 'bg-blue-500/10',
+      value: duration ? `${duration}s` : '—',
+      sub: isRunning ? 'running...' : 'total time',
+      color: isRunning ? 'text-yellow-400' : 'text-blue-400',
+      bgColor: isRunning ? 'bg-yellow-500/10' : 'bg-blue-500/10',
+      pulse: isRunning,
     },
   ];
 
@@ -60,16 +66,45 @@ export default function LiveMetrics({ task, transactions = [] }) {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: i * 0.1 }}
-            className="glass-card p-4"
+            className="glass-card p-4 relative overflow-hidden"
           >
-            <div className={`w-8 h-8 rounded-lg ${stat.bgColor} flex items-center justify-center mb-2`}>
-              <stat.icon className={`w-4 h-4 ${stat.color}`} />
+            {stat.pulse && (
+              <motion.div
+                className="absolute inset-0 bg-yellow-500/5"
+                animate={{ opacity: [0.3, 0.1, 0.3] }}
+                transition={{ duration: 1.5, repeat: Infinity }}
+              />
+            )}
+            <div className={`w-8 h-8 rounded-lg ${stat.bgColor} flex items-center justify-center mb-2 relative z-10`}>
+              <stat.icon className={`w-4 h-4 ${stat.color} ${stat.pulse ? 'animate-pulse' : ''}`} />
             </div>
-            <div className={`text-xl font-bold ${stat.color}`}>{stat.value}</div>
-            <div className="text-xs text-gray-500">{stat.label}</div>
+            <div className={`text-xl font-bold ${stat.color} tabular-nums relative z-10`}>{stat.value}</div>
+            <div className="text-xs text-gray-500 relative z-10">{stat.label}</div>
+            <div className="text-[10px] text-gray-600 mt-0.5 relative z-10">{stat.sub}</div>
           </motion.div>
         ))}
       </div>
+
+      {isRunning && txCount > 0 && duration > 0 && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          className="glass-card p-3 flex items-center justify-between"
+        >
+          <div className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-green-400" />
+            <span className="text-sm text-gray-400">Throughput</span>
+          </div>
+          <div className="flex items-center gap-4 text-sm">
+            <span className="text-white font-mono">
+              {(txCount / elapsedTime).toFixed(2)} <span className="text-gray-500">tx/s</span>
+            </span>
+            <span className="text-green-400 font-mono">
+              ${(totalVolume / elapsedTime).toFixed(4)} <span className="text-gray-500">USDC/s</span>
+            </span>
+          </div>
+        </motion.div>
+      )}
 
       {margin && (
         <motion.div
